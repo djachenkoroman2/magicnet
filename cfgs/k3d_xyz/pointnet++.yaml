@@ -1,0 +1,47 @@
+model:
+  NAME: BaseSeg
+  encoder_args:
+    NAME: PointNet2Encoder
+    in_channels: 4
+    width: null
+    strides: [4, 4, 4, 4]
+    layers: 3
+    use_res: False
+    mlps: [[[32, 32, 64]],
+        [[64, 64, 128]],
+        [[128, 128, 256]],
+        [[256, 256, 512]]]
+    radius: 0.4
+    num_samples: 32
+    sampler: fps
+    aggr_args:
+      NAME: 'convpool'
+      feature_type: 'dp_fj'
+      anisotropic: False
+      reduction: 'max'
+    group_args:
+      NAME: 'ballquery'
+      use_xyz: True
+    conv_args:
+      order: conv-norm-act
+    act_args:
+      act: 'relu'
+    norm_args:
+      norm: 'bn'
+  decoder_args:
+    NAME: PointNet2Decoder
+    fp_mlps: [[128, 128, 128], [256, 128], [256, 256], [256, 256]]
+  cls_args:
+    NAME: SegHead
+    num_classes: 8
+    in_channels: null
+
+datatransforms:
+  train: [PointsToTensor, PointCloudScaling, PointCloudXYZAlign, PointCloudRotation, PointCloudJitter]
+  val: [PointsToTensor, PointCloudXYZAlign]
+  kwargs:
+    gravity_dim: 2
+    scale: [0.9, 1.1]
+    angle: [0, 0, 1]
+    jitter_sigma: 0.005
+    jitter_clip: 0.02

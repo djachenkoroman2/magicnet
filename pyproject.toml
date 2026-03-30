@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=80", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pointnext-local"
+version = "0.0.0"
+description = "Local packaging metadata for the PointNeXt/OpenPoints workspace."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Guocheng Qian and contributors" },
+]
+license = { text = "See upstream project repository for license details." }
+
+# PyTorch, torchvision, torchaudio, torch-scatter, and the CUDA/C++ extensions
+# under openpoints/cpp/* are intentionally not declared here.
+# This repository installs that stack via install_uv.sh into the project-local
+# virtual environment so it can match the local CUDA toolkit exactly.
+dependencies = [
+  "scikit-learn~=1.5",
+  "pickleshare==0.7.5",
+  "ninja>=1.11",
+  "gdown>=5.2,<6",
+  "easydict>=1.13,<2",
+  "PyYAML~=6.0",
+  "protobuf>=4.25,<6",
+  "tensorboard~=2.20",
+  "termcolor>=3,<4",
+  "tqdm>=4.65,<5",
+  "multimethod==2.0.2",
+  "h5py~=3.11",
+  "matplotlib~=3.9",
+  "wandb>=0.17,<1",
+  "setuptools>=80,<83",
+  "Cython>=3,<4",
+  "pandas~=2.2",
+  "shortuuid>=1,<2",
+  "fast-pytorch-kmeans>=0.2,<0.3",
+]
+
+[project.optional-dependencies]
+# Optional packages kept separate to match the current install_uv.sh behavior.
+viz = ["pyvista==0.47.1"]
+distributed = ["deepspeed==0.18.7"]
+all = [
+  "pyvista==0.47.1",
+  "deepspeed==0.18.7",
+]
+
+[project.urls]
+Homepage = "https://github.com/guochengqian/PointNeXt"
+Repository = "https://github.com/guochengqian/PointNeXt"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["openpoints*"]

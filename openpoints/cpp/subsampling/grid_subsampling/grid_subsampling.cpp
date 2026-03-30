@@ -40,8 +40,8 @@ void grid_subsampling(vector<PointXYZ>& original_points,
 	// **********************
 
 	// Verbose parameters
-	int i = 0;
-	int nDisp = N / 100;
+	size_t i = 0;
+	size_t nDisp = (N < 100) ? 1 : N / 100;
 
 	// Initiate variables
 	size_t iX, iY, iZ, mapIdx;
@@ -96,8 +96,8 @@ void grid_subsampling(vector<PointXYZ>& original_points,
 		}
 		if (use_classes)
 		{
-		    for (int i = 0; i < ldim; i++)
-		        subsampled_classes.push_back(max_element(v.second.labels[i].begin(), v.second.labels[i].end(),
+		    for (size_t label_index = 0; label_index < ldim; label_index++)
+		        subsampled_classes.push_back(max_element(v.second.labels[label_index].begin(), v.second.labels[label_index].end(),
 		        [](const pair<int, int>&a, const pair<int, int>&b){return a.second < b.second;})->first);
 		}
 	}

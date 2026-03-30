@@ -67,7 +67,15 @@ static PyObject *grid_subsampling_compute(PyObject *self, PyObject *args, PyObje
 	PyObject *classes_obj = NULL;
 
 	// Keywords containers
-	static char *kwlist[] = {"points", "features", "classes", "sampleDl", "method", "verbose", NULL };
+	static char *kwlist[] = {
+		const_cast<char *>("points"),
+		const_cast<char *>("features"),
+		const_cast<char *>("classes"),
+		const_cast<char *>("sampleDl"),
+		const_cast<char *>("method"),
+		const_cast<char *>("verbose"),
+		NULL
+	};
 	float sampleDl = 0.1;
 	const char *method_buffer = "barycenters";
 	int verbose = 0;
@@ -97,13 +105,16 @@ static PyObject *grid_subsampling_compute(PyObject *self, PyObject *args, PyObje
 		use_classes = false;
 
     // Interpret the input objects as numpy arrays.
-	PyObject *points_array = PyArray_FROM_OTF(points_obj, NPY_FLOAT, NPY_IN_ARRAY);
-	PyObject *features_array = NULL;
-	PyObject *classes_array = NULL;
+	PyArrayObject *points_array = reinterpret_cast<PyArrayObject *>(
+		PyArray_FROM_OTF(points_obj, NPY_FLOAT, NPY_ARRAY_IN_ARRAY));
+	PyArrayObject *features_array = NULL;
+	PyArrayObject *classes_array = NULL;
 	if (use_feature)
-		features_array = PyArray_FROM_OTF(features_obj, NPY_FLOAT, NPY_IN_ARRAY);
+		features_array = reinterpret_cast<PyArrayObject *>(
+			PyArray_FROM_OTF(features_obj, NPY_FLOAT, NPY_ARRAY_IN_ARRAY));
 	if (use_classes)
-		classes_array = PyArray_FROM_OTF(classes_obj, NPY_INT, NPY_IN_ARRAY);
+		classes_array = reinterpret_cast<PyArrayObject *>(
+			PyArray_FROM_OTF(classes_obj, NPY_INT, NPY_ARRAY_IN_ARRAY));
 
 	// Verify data was load correctly.
 	if (points_array == NULL)
@@ -224,6 +235,9 @@ static PyObject *grid_subsampling_compute(PyObject *self, PyObject *args, PyObje
     // Check result
 	if (subsampled_points.size() < 1)
     {
+		Py_DECREF(points_array);
+		Py_XDECREF(features_array);
+		Py_XDECREF(classes_array);
         PyErr_SetString(PyExc_RuntimeError, "Error");
         return NULL;
     }
@@ -232,15 +246,18 @@ static PyObject *grid_subsampling_compute(PyObject *self, PyObject *args, PyObje
     // **************
 
 	// Dimension of input containers
-	npy_intp* point_dims = new npy_intp[2];
-	point_dims[0] = subsampled_points.size();
-	point_dims[1] = 3;
-	npy_intp* feature_dims = new npy_intp[2];
-	feature_dims[0] = subsampled_points.size();
-	feature_dims[1] = fdim;
-	npy_intp* classes_dims = new npy_intp[2];
-	classes_dims[0] = subsampled_points.size();
-	classes_dims[1] = ldim;
+	npy_intp point_dims[2] = {
+		static_cast<npy_intp>(subsampled_points.size()),
+		3
+	};
+	npy_intp feature_dims[2] = {
+		static_cast<npy_intp>(subsampled_points.size()),
+		static_cast<npy_intp>(fdim)
+	};
+	npy_intp classes_dims[2] = {
+		static_cast<npy_intp>(subsampled_points.size()),
+		static_cast<npy_intp>(ldim)
+	};
 
     // Create output array
 	PyObject *res_points_obj = PyArray_SimpleNew(2, point_dims, NPY_FLOAT);
@@ -250,18 +267,18 @@ static PyObject *grid_subsampling_compute(PyObject *self, PyObject *args, PyObje
 
 	// Fill output array with values
 	size_t size_in_bytes = subsampled_points.size() * 3 * sizeof(float);
-	memcpy(PyArray_DATA(res_points_obj), subsampled_points.data(), size_in_bytes);
+	memcpy(PyArray_DATA(reinterpret_cast<PyArrayObject *>(res_points_obj)), subsampled_points.data(), size_in_bytes);
 	if (use_feature)
 	{
 	    size_in_bytes = subsampled_points.size() * fdim * sizeof(float);
 		res_features_obj = PyArray_SimpleNew(2, feature_dims, NPY_FLOAT);
-		memcpy(PyArray_DATA(res_features_obj), subsampled_features.data(), size_in_bytes);
+		memcpy(PyArray_DATA(reinterpret_cast<PyArrayObject *>(res_features_obj)), subsampled_features.data(), size_in_bytes);
 	}
 	if (use_classes)
 	{
 		size_in_bytes = subsampled_points.size() * ldim * sizeof(int);
 		res_classes_obj = PyArray_SimpleNew(2, classes_dims, NPY_INT);
-		memcpy(PyArray_DATA(res_classes_obj), subsampled_classes.data(), size_in_bytes);
+		memcpy(PyArray_DATA(reinterpret_cast<PyArrayObject *>(res_classes_obj)), subsampled_classes.data(), size_in_bytes);
 	}
 
 

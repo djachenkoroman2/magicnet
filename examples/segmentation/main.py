@@ -12,7 +12,7 @@ from torch import distributed as dist, multiprocessing as mp
 from torch.utils.tensorboard import SummaryWriter
 from torch_scatter import scatter
 from openpoints.utils import set_random_seed, save_checkpoint, load_checkpoint, resume_checkpoint, setup_logger_dist, \
-    cal_model_parm_nums, Wandb, generate_exp_directory, resume_exp_directory, EasyConfig, dist_utils, find_free_port, load_checkpoint_inv
+    cal_model_parm_nums, Wandb, generate_exp_directory, resume_exp_directory, EasyConfig, dist_utils, find_free_port, load_checkpoint_inv, parse_config_path
 from openpoints.utils import AverageMeter, ConfusionMatrix, get_mious, get_seg_metrics
 from openpoints.dataset import build_dataloader_from_cfg, get_features_by_keys, get_class_weights
 from openpoints.dataset.data_util import voxelize
@@ -805,8 +805,7 @@ if __name__ == "__main__":
     cfg.sync_bn = cfg.world_size > 1
 
     # init log dir
-    cfg.task_name = args.cfg.split('.')[-2].split('/')[-2]  # task/dataset name, \eg s3dis, modelnet40_cls
-    cfg.cfg_basename = args.cfg.split('.')[-2].split('/')[-1]  # cfg_basename, \eg pointnext-xl
+    cfg.task_name, cfg.cfg_basename = parse_config_path(args.cfg)
     tags = [
         cfg.task_name,  # task name (the folder of name under ./cfgs
         cfg.mode,

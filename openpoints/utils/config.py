@@ -15,6 +15,29 @@ def print_args(args, printer=logging.info):
     printer("==========     args END    =============")
 
 
+def parse_config_path(fpath: str) -> Tuple[str, str]:
+    """Infer task name and config basename from a yaml path.
+
+    For paths under ``cfgs/<task>/...``, the task name is the first directory
+    after ``cfgs`` so nested layouts such as
+    ``cfgs/k3d_xyz/pointnext/pointnext-b.yaml`` still map to ``k3d_xyz``.
+    """
+    normalized = os.path.normpath(fpath)
+    cfg_basename = os.path.splitext(os.path.basename(normalized))[0]
+    parts = normalized.split(os.sep)
+
+    task_name = None
+    for idx in range(len(parts) - 1, -1, -1):
+        if parts[idx] == 'cfgs' and idx + 1 < len(parts):
+            task_name = parts[idx + 1]
+            break
+
+    if task_name is None:
+        task_name = os.path.basename(os.path.dirname(normalized)) or cfg_basename
+
+    return task_name, cfg_basename
+
+
 class EasyConfig(dict):
     def __getattr__(self, key: str) -> Any:
         if key not in self:

@@ -1,5 +1,5 @@
 from .random import set_random_seed
-from .config import EasyConfig, print_args
+from .config import EasyConfig, print_args, parse_config_path
 from .logger import setup_logger_dist, generate_exp_directory, resume_exp_directory
 from .wandb import Wandb
 from .metrics import AverageMeter, ConfusionMatrix, get_mious, get_seg_metrics

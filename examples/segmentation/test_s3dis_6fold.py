@@ -14,7 +14,7 @@ from main import write_to_csv, test, generate_data_list
 from openpoints.models import build_model_from_cfg
 from openpoints.utils import get_mious, ConfusionMatrix
 from openpoints.utils import set_random_seed, load_checkpoint, setup_logger_dist, \
-    cal_model_parm_nums, Wandb, generate_exp_directory, EasyConfig, dist_utils
+    cal_model_parm_nums, Wandb, generate_exp_directory, EasyConfig, dist_utils, parse_config_path
 import warnings
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -62,8 +62,7 @@ if __name__ == "__main__":
 
     cfg.mode = 'test'
     # init log dir
-    cfg.task_name = args.cfg.split('.')[-2].split('/')[-2]
-    cfg.cfg_basename = args.cfg.split('.')[-2].split('/')[-1]  # cfg_basename, \eg pointnext-xl
+    cfg.task_name, cfg.cfg_basename = parse_config_path(args.cfg)
     tags = [
         cfg.task_name,  # task name (the folder of name under ./cfgs
         cfg.mode,
@@ -71,7 +70,7 @@ if __name__ == "__main__":
         f'ngpus{cfg.world_size}',
         f'seed{cfg.seed}',
     ]
-    cfg.exp_name = args.cfg.split('.')[-2].split('/')[-1]
+    cfg.exp_name = cfg.cfg_basename
     tags = [
         cfg.task_name,  # task name (the folder of name under ./cfgs
         cfg.mode,

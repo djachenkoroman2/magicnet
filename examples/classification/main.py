@@ -3,7 +3,7 @@ import os, argparse, yaml, numpy as np
 from torch import multiprocessing as mp
 from examples.classification.train import main as train
 from examples.classification.pretrain import main as pretrain
-from openpoints.utils import EasyConfig, dist_utils, find_free_port, generate_exp_directory, resume_exp_directory, Wandb
+from openpoints.utils import EasyConfig, dist_utils, find_free_port, generate_exp_directory, resume_exp_directory, Wandb, parse_config_path
 
 
 if __name__ == "__main__":
@@ -22,8 +22,7 @@ if __name__ == "__main__":
     cfg.sync_bn = cfg.world_size > 1
 
     # init log dir
-    cfg.task_name = args.cfg.split('.')[-2].split('/')[-2]
-    cfg.exp_name = args.cfg.split('.')[-2].split('/')[-1]
+    cfg.task_name, cfg.exp_name = parse_config_path(args.cfg)
     tags = [
         cfg.task_name,  # task name (the folder of name under ./cfgs
         cfg.mode,

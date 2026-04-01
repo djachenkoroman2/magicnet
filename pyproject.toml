@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=80", "wheel"]
+requires = ["setuptools>=80,<81", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -32,7 +32,7 @@ dependencies = [
   "h5py~=3.11",
   "matplotlib~=3.9",
   "wandb>=0.17,<1",
-  "setuptools>=80,<83",
+  "setuptools>=80,<81",
   "Cython>=3,<4",
   "pandas~=2.2",
   "shortuuid>=1,<2",

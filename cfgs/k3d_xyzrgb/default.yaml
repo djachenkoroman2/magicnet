@@ -1,0 +1,80 @@
+# ---------------------------------------------------------------------------- #
+# Dataset
+# ---------------------------------------------------------------------------- #
+dataset:
+  common:
+    NAME: K3DXYZRGB
+    data_root: data/k3d_xyzrgb
+    voxel_size: 0.2
+    label_values: [1, 2, 3, 4, 5, 6, 7, 8]
+    class_names: [class_1, class_2, class_3, class_4, class_5, class_6, class_7, class_8]
+  train:
+    split: train
+    voxel_max: 40000
+    loop: 30
+    presample: False
+  val:
+    split: val
+    voxel_max: 40000
+    presample: False
+  test:
+    split: test
+    voxel_max: 40000
+    presample: False
+
+feature_keys: pos,x,heights
+num_classes: 8
+batch_size: 1
+val_batch_size: 1
+
+dataloader:
+  num_workers: 4
+
+runtime:
+  device: gpu  # switch to cpu to force CPU execution
+  gpu_id: 0
+
+datatransforms:
+  train: [ChromaticAutoContrast, PointsToTensor, PointCloudScaling, PointCloudXYZAlign, PointCloudRotation, PointCloudJitter, ChromaticDropGPU, ChromaticNormalize]
+  val: [PointsToTensor, PointCloudXYZAlign, ChromaticNormalize]
+  kwargs:
+    color_drop: 0.2
+    gravity_dim: 2
+    scale: [0.9, 1.1]
+    angle: [0, 0, 1]
+    jitter_sigma: 0.005
+    jitter_clip: 0.02
+
+# ---------------------------------------------------------------------------- #
+# Training
+# ---------------------------------------------------------------------------- #
+val_fn: validate
+ignore_index: null
+epochs: 100
+cls_weighed_loss: False
+
+criterion_args:
+  NAME: CrossEntropy
+  label_smoothing: 0.2
+
+optimizer:
+ NAME: 'adamw'
+ weight_decay: 1.0e-4
+
+sched: cosine
+warmup_epochs: 0
+min_lr: 1.0e-5
+lr: 0.01
+
+grad_norm_clip: 10
+use_voting: False
+
+# ---------------------------------------------------------------------------- #
+# IO
+# ---------------------------------------------------------------------------- #
+log_dir: 'k3d_xyzrgb'
+save_freq: -1
+val_freq: 1
+
+wandb:
+  project: PointNeXt-K3DXYZRGB

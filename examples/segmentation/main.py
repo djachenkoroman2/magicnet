@@ -17,6 +17,7 @@ from openpoints.utils import AverageMeter, ConfusionMatrix, get_mious, get_seg_m
 from openpoints.dataset import build_dataloader_from_cfg, get_features_by_keys, get_class_weights
 from openpoints.dataset.data_util import voxelize
 from openpoints.dataset.k3d_xyz import load_k3d_xyz_array, remap_k3d_xyz_labels, resolve_k3d_xyz_path, read_k3d_xyz_split
+from openpoints.dataset.k3d_xyzrgb import load_k3d_xyzrgb_array, remap_k3d_xyzrgb_labels, resolve_k3d_xyzrgb_path, read_k3d_xyzrgb_split
 from openpoints.dataset.semantic_kitti.semantickitti import load_label_kitti, load_pc_kitti, remap_lut_read, remap_lut_write, get_semantickitti_file_list
 from openpoints.transforms import build_transforms_from_cfg
 from openpoints.optim import build_optimizer_from_cfg
@@ -26,6 +27,14 @@ from openpoints.models import build_model_from_cfg
 import warnings
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
+
+
+def _is_k3d_xyzrgb_dataset(dataset_name):
+    return 'k3d_xyzrgb' in dataset_name or 'k3dxyzrgb' in dataset_name
+
+
+def _is_k3d_xyz_dataset(dataset_name):
+    return ('k3d_xyz' in dataset_name or 'k3dxyz' in dataset_name) and not _is_k3d_xyzrgb_dataset(dataset_name)
 
 
 def _normalize_runtime_cfg(cfg):
@@ -129,7 +138,10 @@ def generate_data_list(cfg):
         data_list = explicit_data_list if explicit_data_list is not None else [explicit_data_path]
         if isinstance(data_list, str):
             data_list = [data_list]
-        if 'k3d_xyz' in dataset_name or 'k3dxyz' in dataset_name:
+        if _is_k3d_xyzrgb_dataset(dataset_name):
+            raw_root = os.path.join(cfg.dataset.common.data_root, 'raw')
+            return [str(resolve_k3d_xyzrgb_path(raw_root, item)) for item in data_list]
+        if _is_k3d_xyz_dataset(dataset_name):
             raw_root = os.path.join(cfg.dataset.common.data_root, 'raw')
             return [str(resolve_k3d_xyz_path(raw_root, item)) for item in data_list]
         return [str(item) for item in data_list]
@@ -148,7 +160,15 @@ def generate_data_list(cfg):
             split_no = 2
         data_list = get_semantickitti_file_list(os.path.join(cfg.dataset.common.data_root, 'sequences'),
                                                 str(cfg.dataset.test.test_id + 11))[split_no]
-    elif 'k3d_xyz' in dataset_name or 'k3dxyz' in dataset_name:
+    elif _is_k3d_xyzrgb_dataset(dataset_name):
+        raw_root = os.path.join(cfg.dataset.common.data_root, 'raw')
+        split_root = os.path.join(cfg.dataset.common.data_root, 'splits')
+        split_name = cfg.dataset.test.split
+        data_list = [
+            str(resolve_k3d_xyzrgb_path(raw_root, item))
+            for item in read_k3d_xyzrgb_split(split_root, split_name)
+        ]
+    elif _is_k3d_xyz_dataset(dataset_name):
         raw_root = os.path.join(cfg.dataset.common.data_root, 'raw')
         split_root = os.path.join(cfg.dataset.common.data_root, 'splits')
         split_name = cfg.dataset.test.split
@@ -180,7 +200,17 @@ def load_data(data_path, cfg):
         coord = load_pc_kitti(data_path[0])
         if cfg.dataset.test.split != 'test':
             label = load_label_kitti(data_path[1], remap_lut_read)
-    elif 'k3d_xyz' in dataset_name or 'k3dxyz' in dataset_name:
+    elif _is_k3d_xyzrgb_dataset(dataset_name):
+        data = load_k3d_xyzrgb_array(data_path)  # xyzrgbl, N*7
+        coord = data[:, :3]
+        feat = data[:, 3:6].astype(np.float32)
+        label_values = cfg.dataset.common.get('label_values', None)
+        if label_values is None:
+            raise ValueError(
+                '`dataset.common.label_values` must be set for K3DXYZRGB so test-time label remapping is stable.'
+            )
+        label = remap_k3d_xyzrgb_labels(data[:, 6], label_values)
+    elif _is_k3d_xyz_dataset(dataset_name):
         data = load_k3d_xyz_array(data_path)  # xyzl, N*4
         coord = data[:, :3]
         feat = None
@@ -809,7 +839,20 @@ def test(model, data_list, cfg, num_votes=1, device=None):
                 save_file_name=save_file_name[0]+'_'+save_file_name[1]+'.txt'
                 save_file_name=os.path.join(cfg.save_path,save_file_name)
                 np.savetxt(save_file_name, pred, fmt="%d")
-            elif 'k3d_xyz' in cfg.dataset.common.NAME.lower() or 'k3dxyz' in cfg.dataset.common.NAME.lower():
+            elif _is_k3d_xyzrgb_dataset(cfg.dataset.common.NAME.lower()):
+                pred = pred.cpu().numpy().squeeze().astype(np.int64)
+                raw_label_values = np.asarray(cfg.dataset.common.label_values, dtype=np.int64)
+                pred_raw = raw_label_values[pred]
+                raw_scene = load_k3d_xyzrgb_array(data_path)
+                save_file_name = os.path.splitext(os.path.basename(str(data_path)))[0] + '_pred.txt'
+                save_file_name = os.path.join(cfg.save_path, save_file_name)
+                raw_rgb = np.rint(raw_scene[:, 3:6]).astype(np.int64)
+                np.savetxt(
+                    save_file_name,
+                    np.column_stack((raw_scene[:, :3], raw_rgb, pred_raw)),
+                    fmt=['%.8f', '%.8f', '%.8f', '%d', '%d', '%d', '%d'],
+                )
+            elif _is_k3d_xyz_dataset(cfg.dataset.common.NAME.lower()):
                 pred = pred.cpu().numpy().squeeze().astype(np.int64)
                 raw_label_values = np.asarray(cfg.dataset.common.label_values, dtype=np.int64)
                 pred_raw = raw_label_values[pred]

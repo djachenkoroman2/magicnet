@@ -1,0 +1,39 @@
+# PointTransformer for K3DXYZRGB semantic segmentation.
+# Uses variable-length batches and xyz + rgb + height inputs.
+
+model:
+  NAME: PTSeg
+  block: PointTransformerBlock
+  blocks: [2, 3, 4, 6, 3]
+  width: 32
+  nsample: [8, 16, 16, 16, 16]
+  in_channels: 7
+  num_classes: 8
+  dec_local_aggr: True
+  mid_res: False
+
+feature_keys: pos,x,heights
+
+batch_size: 1
+val_batch_size: 1
+step_per_update: 2
+
+dataloader:
+  collate_fn: concat_collate_fn
+
+dataset:
+  common:
+    variable: True
+  train:
+    voxel_max: 12000
+
+datatransforms:
+  train: [ChromaticAutoContrast, PointsToTensor, PointCloudScaling, PointCloudXYZAlign, PointCloudRotation, PointCloudJitter, ChromaticDropGPU, ChromaticNormalize]
+  val: [PointsToTensor, PointCloudXYZAlign, ChromaticNormalize]
+  kwargs:
+    color_drop: 0.2
+    gravity_dim: 2
+    scale: [0.9, 1.1]
+    angle: [0, 0, 1]
+    jitter_sigma: 0.005
+    jitter_clip: 0.02

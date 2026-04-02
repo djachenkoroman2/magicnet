@@ -9,3 +9,4 @@ from .scanobjectnn import *
 from .shapenetpart import *
 from .scannetv2 import *
 from .k3d_xyz import *
+from .k3d_xyzrgb import *

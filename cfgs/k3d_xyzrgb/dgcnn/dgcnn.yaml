@@ -1,0 +1,37 @@
+# DGCNN for K3DXYZRGB semantic segmentation.
+# Same low-memory layout as K3DXYZ, but with xyz + rgb + height inputs.
+
+model:
+  NAME: BaseSeg
+  encoder_args:
+    NAME: DGCNN
+    in_channels: 7
+    channels: 64
+    embed_dim: 1024
+    n_blocks: 5
+    conv: edge
+    k: 20
+    knn_max_cdist_mb: 128
+    is_seg: True
+    norm_args:
+      norm: bn
+    act_args:
+      act: leakyrelu
+      negative_slope: 0.2
+    conv_args:
+      order: conv-norm-act
+  cls_args:
+    NAME: SegHead
+    num_classes: 8
+    mlps: [512, 256]
+    act_args:
+      act: leakyrelu
+      negative_slope: 0.2
+
+batch_size: 1
+val_batch_size: 1
+step_per_update: 2
+
+dataset:
+  train:
+    voxel_max: 6000

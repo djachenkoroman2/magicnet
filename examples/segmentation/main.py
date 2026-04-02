@@ -28,6 +28,62 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
+def _normalize_runtime_cfg(cfg):
+    runtime_cfg = cfg.get('runtime', EasyConfig())
+    if not isinstance(runtime_cfg, EasyConfig):
+        normalized = EasyConfig()
+        normalized.update(runtime_cfg)
+        runtime_cfg = normalized
+    runtime_cfg.device = str(runtime_cfg.get('device', 'auto')).lower()
+    runtime_cfg.gpu_id = int(runtime_cfg.get('gpu_id', 0))
+    if runtime_cfg.device not in {'auto', 'cpu', 'gpu', 'cuda'}:
+        raise ValueError(
+            f"Unsupported runtime.device={runtime_cfg.device!r}. Use one of: auto, cpu, gpu."
+        )
+    cfg.runtime = runtime_cfg
+    return runtime_cfg
+
+
+def resolve_runtime_device(cfg):
+    runtime_cfg = _normalize_runtime_cfg(cfg)
+    requested_device = runtime_cfg.device
+
+    if requested_device == 'cpu':
+        return torch.device('cpu')
+
+    if requested_device in {'gpu', 'cuda'} and not torch.cuda.is_available():
+        raise RuntimeError(
+            'runtime.device is set to GPU, but torch.cuda.is_available() is False. '
+            'Switch runtime.device to cpu or run in an environment with visible NVIDIA devices.'
+        )
+
+    if requested_device in {'gpu', 'cuda', 'auto'} and torch.cuda.is_available():
+        gpu_count = torch.cuda.device_count()
+        if runtime_cfg.gpu_id < 0 or runtime_cfg.gpu_id >= gpu_count:
+            raise RuntimeError(
+                f'runtime.gpu_id={runtime_cfg.gpu_id} is out of range for {gpu_count} visible GPU(s).'
+            )
+        return torch.device(f'cuda:{runtime_cfg.gpu_id}')
+
+    return torch.device('cpu')
+
+
+def get_process_device(cfg, gpu=None):
+    if cfg.device_type != 'cuda':
+        return torch.device('cpu')
+    if cfg.distributed:
+        return torch.device(f'cuda:{gpu}')
+    return torch.device(cfg.device)
+
+
+def move_batch_to_device(data, device):
+    non_blocking = device.type == 'cuda'
+    keys = list(data.keys() if callable(data.keys) else data.keys)
+    for key in keys:
+        data[key] = data[key].to(device, non_blocking=non_blocking)
+    return data
+
+
 def write_to_csv(oa, macc, miou, ious, best_epoch, cfg, write_header=True, area=5):
     ious_table = [f'{item:.2f}' for item in ious]
     header = ['method', 'Area', 'OA', 'mACC', 'mIoU'] + cfg.classes + ['best_epoch', 'log_path', 'wandb link']
@@ -165,6 +221,7 @@ def load_data(data_path, cfg):
 
 
 def main(gpu, cfg):
+    device = get_process_device(cfg, gpu)
     if cfg.distributed:
         if cfg.mp:
             cfg.rank = gpu
@@ -184,10 +241,11 @@ def main(gpu, cfg):
     set_random_seed(cfg.seed + cfg.rank, deterministic=cfg.deterministic)
     torch.backends.cudnn.enabled = True
     logging.info(cfg)
+    logging.info(f'Runtime device: {device}')
 
     if cfg.model.get('in_channels', None) is None:
         cfg.model.in_channels = cfg.model.encoder_args.in_channels
-    model = build_model_from_cfg(cfg.model).to(cfg.rank)
+    model = build_model_from_cfg(cfg.model).to(device)
     model_size = cal_model_parm_nums(model)
     logging.info(model)
     logging.info('Number of params: %.4f M' % (model_size / 1e6))
@@ -196,8 +254,8 @@ def main(gpu, cfg):
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
         logging.info('Using Synchronized BatchNorm ...')
     if cfg.distributed:
-        torch.cuda.set_device(gpu)
-        model = nn.parallel.DistributedDataParallel(model.cuda(), device_ids=[cfg.rank], output_device=cfg.rank)
+        torch.cuda.set_device(device.index)
+        model = nn.parallel.DistributedDataParallel(model, device_ids=[device.index], output_device=device.index)
         logging.info('Using Distributed Data parallel ...')
 
     # optimizer & scheduler
@@ -230,7 +288,7 @@ def main(gpu, cfg):
             if cfg.mode == 'val':
                 best_epoch, best_val = load_checkpoint(model, pretrained_path=cfg.pretrained_path)
                 val_miou, val_macc, val_oa, val_ious, val_accs, val_f1s, val_mf1 = validate_fn(
-                    model, val_loader, cfg, num_votes=1, epoch=-1)
+                    model, val_loader, cfg, num_votes=1, epoch=-1, device=device)
                 with np.printoptions(precision=2, suppress=True):
                     logging.info(
                         f'Best ckpt @E{best_epoch},  val_oa , val_macc, val_miou, val_mf1: '
@@ -242,7 +300,8 @@ def main(gpu, cfg):
                 best_epoch, best_val = load_checkpoint(model, pretrained_path=cfg.pretrained_path)
                 data_list = generate_data_list(cfg)
                 logging.info(f"length of test dataset: {len(data_list)}")
-                test_miou, test_macc, test_oa, test_ious, test_accs, test_f1s, test_mf1, _ = test(model, data_list, cfg)
+                test_miou, test_macc, test_oa, test_ious, test_accs, test_f1s, test_mf1, _ = test(
+                    model, data_list, cfg, device=device)
 
                 if test_miou is not None:
                     with np.printoptions(precision=2, suppress=True):
@@ -288,11 +347,12 @@ def main(gpu, cfg):
             cfg.criterion_args.weight = get_class_weights(train_loader.dataset.num_per_class, normalize=True)
         else:
             logging.info('`num_per_class` attribute is not founded in dataset')
-    criterion = build_criterion_from_cfg(cfg.criterion_args).cuda()
+    criterion = build_criterion_from_cfg(cfg.criterion_args).to(device)
 
     # ===> start training
+    amp_enabled = cfg.use_amp and device.type == 'cuda'
     if cfg.use_amp:
-        scaler = torch.cuda.amp.GradScaler()
+        scaler = torch.cuda.amp.GradScaler(enabled=amp_enabled)
     else:
         scaler = None
 
@@ -306,12 +366,12 @@ def main(gpu, cfg):
         if hasattr(train_loader.dataset, 'epoch'):  # some dataset sets the dataset length as a fixed steps.
             train_loader.dataset.epoch = epoch - 1
         train_loss, train_miou, train_macc, train_oa, train_ious, train_accs, train_f1s, train_mf1, total_iter = \
-            train_one_epoch(model, train_loader, criterion, optimizer, scheduler, scaler, epoch, total_iter, cfg)
+            train_one_epoch(model, train_loader, criterion, optimizer, scheduler, scaler, epoch, total_iter, cfg, device)
 
         is_best = False
         if epoch % cfg.val_freq == 0:
             val_miou, val_macc, val_oa, val_ious, val_accs, val_f1s, val_mf1 = validate_fn(
-                model, val_loader, cfg, epoch=epoch, total_iter=total_iter)
+                model, val_loader, cfg, epoch=epoch, total_iter=total_iter, device=device)
             log_classwise_table('Val', cfg.classes, val_ious, val_f1s, val_accs)
             if val_miou > best_val:
                 is_best = True
@@ -381,10 +441,11 @@ def main(gpu, cfg):
         if 'sphere' in cfg.dataset.common.NAME.lower():
             # TODO: 
             test_miou, test_macc, test_oa, test_ious, test_accs, test_f1s, test_mf1 = validate_sphere(
-                model, val_loader, cfg, epoch=epoch)
+                model, val_loader, cfg, epoch=epoch, device=device)
         else:
             data_list = generate_data_list(cfg)
-            test_miou, test_macc, test_oa, test_ious, test_accs, test_f1s, test_mf1, _ = test(model, data_list, cfg)
+            test_miou, test_macc, test_oa, test_ious, test_accs, test_f1s, test_mf1, _ = test(
+                model, data_list, cfg, device=device)
         with np.printoptions(precision=2, suppress=True):
             logging.info(
                 f'Best ckpt @E{best_epoch},  test_oa {test_oa:.2f}, test_macc {test_macc:.2f}, '
@@ -403,7 +464,7 @@ def main(gpu, cfg):
             load_checkpoint(model, pretrained_path=os.path.join(cfg.ckpt_dir, f'{cfg.run_name}_ckpt_best.pth'))
             set_random_seed(cfg.seed)
             val_miou, val_macc, val_oa, val_ious, val_accs, val_f1s, val_mf1 = validate_fn(
-                model, val_loader, cfg, num_votes=20, data_transform=data_transform, epoch=epoch)
+                model, val_loader, cfg, num_votes=20, data_transform=data_transform, epoch=epoch, device=device)
             if writer is not None:
                 writer.add_scalar('val_miou20', val_miou, cfg.epochs + 50)
                 writer.add_scalar('val_mf120', val_mf1, cfg.epochs + 50)
@@ -423,16 +484,14 @@ def main(gpu, cfg):
     wandb.finish(exit_code=True)
 
 
-def train_one_epoch(model, train_loader, criterion, optimizer, scheduler, scaler, epoch, total_iter, cfg):
+def train_one_epoch(model, train_loader, criterion, optimizer, scheduler, scaler, epoch, total_iter, cfg, device):
     loss_meter = AverageMeter()
     cm = ConfusionMatrix(num_classes=cfg.num_classes, ignore_index=cfg.ignore_index)
     model.train()  # set model to training mode
     pbar = tqdm(enumerate(train_loader), total=train_loader.__len__())
     num_iter = 0
     for idx, data in pbar:
-        keys = data.keys() if callable(data.keys) else data.keys
-        for key in keys:
-            data[key] = data[key].cuda(non_blocking=True)
+        data = move_batch_to_device(data, device)
         num_iter += 1
         target = data['y'].squeeze(-1)
         """ debug
@@ -444,7 +503,7 @@ def train_one_epoch(model, train_loader, criterion, optimizer, scheduler, scaler
         data['epoch'] = epoch
         total_iter += 1 
         data['iter'] = total_iter 
-        with torch.cuda.amp.autocast(enabled=cfg.use_amp):
+        with torch.cuda.amp.autocast(enabled=cfg.use_amp and device.type == 'cuda'):
             logits = model(data)
             loss = criterion(logits, target) if 'mask' not in cfg.criterion_args.NAME.lower() \
                 else criterion(logits, target, data['mask'])
@@ -483,14 +542,12 @@ def train_one_epoch(model, train_loader, criterion, optimizer, scheduler, scaler
 
 
 @torch.no_grad()
-def validate(model, val_loader, cfg, num_votes=1, data_transform=None, epoch=-1, total_iter=-1):
+def validate(model, val_loader, cfg, num_votes=1, data_transform=None, epoch=-1, total_iter=-1, device=None):
     model.eval()  # set model to eval mode
     cm = ConfusionMatrix(num_classes=cfg.num_classes, ignore_index=cfg.ignore_index)
     pbar = tqdm(enumerate(val_loader), total=val_loader.__len__(), desc='Val')
     for idx, data in pbar:
-        keys = data.keys() if callable(data.keys) else data.keys
-        for key in keys:
-            data[key] = data[key].cuda(non_blocking=True)
+        data = move_batch_to_device(data, device)
         target = data['y'].squeeze(-1)
         data['x'] = get_features_by_keys(data, cfg.feature_keys)
         data['epoch'] = epoch
@@ -529,7 +586,7 @@ def validate(model, val_loader, cfg, num_votes=1, data_transform=None, epoch=-1,
 
 
 @torch.no_grad()
-def validate_sphere(model, val_loader, cfg, num_votes=1, data_transform=None, epoch=-1, total_iter=-1):
+def validate_sphere(model, val_loader, cfg, num_votes=1, data_transform=None, epoch=-1, total_iter=-1, device=None):
     """
     validation for sphere sampled input points with mask.
     in this case, between different batches, there are overlapped points.
@@ -547,8 +604,7 @@ def validate_sphere(model, val_loader, cfg, num_votes=1, data_transform=None, ep
     pbar = tqdm(enumerate(val_loader), total=val_loader.__len__())
     all_logits, idx_points = [], []
     for idx, data in pbar:
-        for key in data.keys():
-            data[key] = data[key].cuda(non_blocking=True)
+        data = move_batch_to_device(data, device)
         data['x'] = get_features_by_keys(data, cfg.feature_keys)
         data['epoch'] = epoch
         data['iter'] = total_iter 
@@ -574,7 +630,8 @@ def validate_sphere(model, val_loader, cfg, num_votes=1, data_transform=None, ep
     val_points_preds = all_logits[val_points_projections]
 
     del all_logits, idx_points
-    torch.cuda.empty_cache()
+    if device is not None and device.type == 'cuda':
+        torch.cuda.empty_cache()
 
     cm.update(val_points_preds, val_points_labels)
     miou, macc, oa, ious, accs, f1s, mf1 = cm.all_metrics_with_f1()
@@ -606,7 +663,7 @@ def validate_sphere(model, val_loader, cfg, num_votes=1, data_transform=None, ep
 
 # TODO: multi gpu support. Warp to a dataloader.
 @torch.no_grad()
-def test(model, data_list, cfg, num_votes=1):
+def test(model, data_list, cfg, num_votes=1, device=None):
     """using a part of original point cloud as input to save memory.
     Args:
         model (_type_): _description_
@@ -646,7 +703,8 @@ def test(model, data_list, cfg, num_votes=1):
         all_logits = []
         coord, feat, label, idx_points, voxel_idx, reverse_idx_part, reverse_idx  = load_data(data_path, cfg)
         if label is not None:
-            label = torch.from_numpy(label.astype(np.int64).squeeze()).cuda(non_blocking=True)
+            label = torch.from_numpy(label.astype(np.int64).squeeze()).to(
+                device, non_blocking=device.type == 'cuda')
 
         len_part = len(idx_points)
         nearest_neighbor = len_part == 1
@@ -681,8 +739,7 @@ def test(model, data_list, cfg, num_votes=1):
                     data['o'] = torch.IntTensor([len(coord_part)])
                     data['batch'] = torch.LongTensor([0] * len(coord_part))
 
-                for key in data.keys():
-                    data[key] = data[key].cuda(non_blocking=True)
+                data = move_batch_to_device(data, device)
                 data['x'] = get_features_by_keys(data, cfg.feature_keys)
                 logits = model(data)
                 """visualization in debug mode. !!! visulization is not correct, should remove ignored idx.
@@ -697,7 +754,8 @@ def test(model, data_list, cfg, num_votes=1):
 
         if not nearest_neighbor:
             # average merge overlapped multi voxels logits to original point set
-            idx_points = torch.from_numpy(np.hstack(idx_points)).cuda(non_blocking=True)
+            idx_points = torch.from_numpy(np.hstack(idx_points)).to(
+                device, non_blocking=device.type == 'cuda')
             all_logits = scatter(all_logits, idx_points, dim=0, reduce='mean')
         else:
             # interpolate logits by nearest neighbor
@@ -797,12 +855,23 @@ if __name__ == "__main__":
     cfg.load(args.cfg, recursive=True)
     cfg.update(opts)  # overwrite the default arguments in yml
 
+    resolved_device = resolve_runtime_device(cfg)
+    cfg.device = str(resolved_device)
+    cfg.device_type = resolved_device.type
+    cfg.device_id = 0 if resolved_device.index is None else resolved_device.index
+    cfg.use_gpu = cfg.device_type == 'cuda'
+    if not cfg.use_gpu:
+        cfg.dist_backend = 'gloo'
+    if cfg.use_amp and not cfg.use_gpu:
+        print('AMP requested in config, but CPU mode is active; disabling AMP.')
+        cfg.use_amp = False
+
     if cfg.seed is None:
         cfg.seed = np.random.randint(1, 10000)
 
     # init distributed env first, since logger depends on the dist info.
     cfg.rank, cfg.world_size, cfg.distributed, cfg.mp = dist_utils.get_dist_info(cfg)
-    cfg.sync_bn = cfg.world_size > 1
+    cfg.sync_bn = cfg.use_gpu and cfg.world_size > 1
 
     # init log dir
     cfg.task_name, cfg.cfg_basename = parse_config_path(args.cfg)
@@ -810,6 +879,7 @@ if __name__ == "__main__":
         cfg.task_name,  # task name (the folder of name under ./cfgs
         cfg.mode,
         cfg.cfg_basename,  # cfg file name
+        cfg.device_type,
         f'ngpus{cfg.world_size}',
     ]
     opt_list = [] # for checking experiment configs from logging file

@@ -57,6 +57,7 @@
 
 **Что важно знать**
 - `feature_keys: pos,heights` здесь согласован с [pointnet++.yaml](/home/researcher/dev/PointNeXt/cfgs/k3d_xyz/pointnet++.yaml#L5), где `in_channels: 4`.
+- `runtime.device` в [default.yaml](/home/researcher/dev/magicnet/cfgs/k3d_xyz/default.yaml) теперь переключает устройство исполнения: `gpu`, `cpu` или `auto`.
 - `wandb.project` сам по себе не включает W&B; для этого ещё нужен `wandb.use_wandb: False/True` из [cfgs/default.yaml](/home/researcher/dev/PointNeXt/cfgs/default.yaml#L35).
 - `log_dir` в рантайме перезаписывается в [logger.py](/home/researcher/dev/PointNeXt/openpoints/utils/logger.py#L129).
 - `val_fn` и `use_voting` выглядят как частично устаревшие поля для текущего segmentation pipeline.
@@ -77,6 +78,20 @@
 python examples/segmentation/main.py --cfg cfgs/k3d_xyz/pointnext-s.yaml
 python examples/segmentation/main.py --cfg cfgs/k3d_xyz/pointnext-b.yaml
 python examples/segmentation/main.py --cfg cfgs/k3d_xyz/pointnext-l.yaml
+```
+
+Переключение CPU/GPU теперь задаётся в YAML:
+
+```yaml
+runtime:
+  device: gpu   # gpu | cpu | auto
+  gpu_id: 0
+```
+
+Если хочешь разово запустить тот же конфиг на CPU без редактирования файла:
+
+```bash
+python examples/segmentation/main.py --cfg cfgs/k3d_xyz/pointnet++.yaml runtime.device=cpu
 ```
 
 Если хочется сначала самый безопасный по ресурсам вариант, начинай с `pointnext-s.yaml`, потом переходи к `pointnext-b.yaml`, и только после этого к `pointnext-l.yaml`.
@@ -192,4 +207,3 @@ python examples/segmentation/main.py --cfg cfgs/k3d_xyz/pointnet++.yaml \
 Коротко:
 - `ckpt_latest.pth` — для `resume`
 - `ckpt_best.pth` — для `val` и обычно для `test`
-

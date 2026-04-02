@@ -88,6 +88,20 @@ detect_python_bin() {
     echo "python"
 }
 
+maybe_load_modules() {
+    if [[ "${USE_ENV_MODULES:-0}" != "1" ]]; then
+        return 0
+    fi
+
+    if command -v module >/dev/null 2>&1; then
+        module load cuda/11.1.1
+        module load gcc
+        echo "Loaded environment modules (cuda/11.1.1, gcc)"
+    else
+        echo "USE_ENV_MODULES=1 was requested, but \`module\` is unavailable; continuing with current environment"
+    fi
+}
+
 if [[ $# -lt 1 ]]; then
     echo "Usage: bash script/main_segmentation.sh <config_path> [extra args...]" >&2
     exit 1
@@ -95,25 +109,7 @@ fi
 
 [ ! -d "slurm_logs" ] && echo "Create a directory slurm_logs" && mkdir -p slurm_logs
 
-if command -v module >/dev/null 2>&1; then
-    module load cuda/11.1.1
-    module load gcc
-else
-    echo "module command not found, skipping module load"
-fi
-
-echo "===> Anaconda env loaded"
-if [[ -f ~/.bashrc ]]; then
-    # shellcheck disable=SC1090
-    source ~/.bashrc
-fi
-
-if command -v conda >/dev/null 2>&1; then
-    eval "$(conda shell.bash hook)"
-    if ! conda activate openpoints 2>/dev/null; then
-        echo "conda env openpoints not found, continuing without activation"
-    fi
-fi
+maybe_load_modules
 
 PYTHON_BIN=$(detect_python_bin)
 echo "Using Python: $PYTHON_BIN"

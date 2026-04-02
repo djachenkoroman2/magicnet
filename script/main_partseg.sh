@@ -13,14 +13,48 @@
 ##SBATCH --mem=30G
 ##SBATCH --mail-type=FAIL,TIME_LIMIT,TIME_LIMIT_90
 
+set -euo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+cd "$REPO_ROOT"
+
+detect_python_bin() {
+    if [[ -n "${PYTHON_BIN:-}" ]]; then
+        echo "$PYTHON_BIN"
+        return 0
+    fi
+
+    if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+        echo "$REPO_ROOT/.venv/bin/python"
+        return 0
+    fi
+
+    if command -v python >/dev/null 2>&1; then
+        command -v python
+        return 0
+    fi
+
+    echo "python"
+}
+
+maybe_load_modules() {
+    if [[ "${USE_ENV_MODULES:-0}" != "1" ]]; then
+        return 0
+    fi
+
+    if command -v module >/dev/null 2>&1; then
+        module load cuda/11.1.1
+        module load gcc
+        echo "Loaded environment modules (cuda/11.1.1, gcc)"
+    else
+        echo "USE_ENV_MODULES=1 was requested, but \`module\` is unavailable; continuing with current environment"
+    fi
+}
 
 [ ! -d "slurm_logs" ] && echo "Create a directory slurm_logs" && mkdir -p slurm_logs
 
-module load cuda/11.1.1
-module load gcc
-
-echo "===> Anaconda env loaded"
-source activate openpoints
+maybe_load_modules
 
 while true
 do
@@ -40,6 +74,9 @@ NUM_GPU_AVAILABLE=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
 echo $NUM_GPU_AVAILABLE
 
 
+PYTHON_BIN=$(detect_python_bin)
+echo "Using Python: $PYTHON_BIN"
+
 cfg=$1
 PY_ARGS=${@:2}
-python examples/shapenetpart/main.py --cfg $cfg ${PY_ARGS}
+"$PYTHON_BIN" examples/shapenetpart/main.py --cfg $cfg ${PY_ARGS}

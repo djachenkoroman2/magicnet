@@ -21,18 +21,20 @@ class SmoothCrossEntropy(torch.nn.Module):
         self.ignore_index = ignore_index
         self.return_valid = return_valid
         # Reduce label values in the range of logit shape
+        reducing_list = torch.empty(0, dtype=torch.long)
         if ignore_index is not None:
-            reducing_list = torch.range(0, num_classes).long().cuda(non_blocking=True)
-            inserted_value = torch.zeros((1, )).long().cuda(non_blocking=True)
-            self.reducing_list = torch.cat([
+            reducing_list = torch.arange(0, num_classes + 1, dtype=torch.long)
+            inserted_value = torch.zeros((1,), dtype=torch.long)
+            reducing_list = torch.cat([
                 reducing_list[:ignore_index], inserted_value,
                 reducing_list[ignore_index:]
             ], 0)
+        self.register_buffer('reducing_list', reducing_list, persistent=False)
+
+        weight_tensor = torch.empty(0, dtype=torch.float32)
         if weight is not None:
-            self.weight = torch.from_numpy(weight).float().cuda(
-                non_blocking=True).squeeze()
-        else:
-            self.weight = None
+            weight_tensor = torch.as_tensor(weight, dtype=torch.float32).squeeze()
+        self.register_buffer('weight', weight_tensor, persistent=False)
             
     def forward(self, pred, gt):
         if len(pred.shape)>2:
@@ -50,12 +52,12 @@ class SmoothCrossEntropy(torch.nn.Module):
             one_hot = torch.zeros_like(pred).scatter(1, gt.view(-1, 1), 1)
             one_hot = one_hot * (1 - self.label_smoothing) + (1 - one_hot) * self.label_smoothing / (n_class - 1)
             log_prb = F.log_softmax(pred, dim=1)
-            if self.weight is not None:
+            if self.weight.numel() > 0:
                 loss = -(one_hot * log_prb * self.weight).sum(dim=1).mean()
             else:
                 loss = -(one_hot * log_prb).sum(dim=1).mean()
         else:
-            loss = F.cross_entropy(pred, gt, weight=self.weight)
+            loss = F.cross_entropy(pred, gt, weight=self.weight if self.weight.numel() > 0 else None)
         
         if self.return_valid:
             return loss, pred, gt

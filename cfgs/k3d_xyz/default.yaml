@@ -30,6 +30,10 @@ val_batch_size: 1
 dataloader:
   num_workers: 4
 
+runtime:
+  device: gpu  # switch to cpu to force CPU execution
+  gpu_id: 0
+
 datatransforms:
   train: [PointsToTensor, PointCloudScaling, PointCloudXYZAlign, PointCloudRotation, PointCloudJitter]
   val: [PointsToTensor, PointCloudXYZAlign]

@@ -6,13 +6,15 @@ from torch import distributed as dist
 def _init_dist_pytorch(backend, **kwargs):
     rank = int(os.environ['RANK'])
     num_gpus = torch.cuda.device_count()
-    torch.cuda.set_device(rank % num_gpus)
+    if num_gpus > 0:
+        torch.cuda.set_device(rank % num_gpus)
     dist.init_process_group(backend=backend, **kwargs)
     print(f'init distributed in rank {torch.distributed.get_rank()}')
 
 
 def get_dist_info(cfg):
     mp = False
+    use_gpu = getattr(cfg, 'use_gpu', torch.cuda.is_available())
     if dist.is_available() and dist.is_initialized():
         rank = dist.get_rank()
         world_size = dist.get_world_size()
@@ -20,10 +22,11 @@ def get_dist_info(cfg):
     else:
         # only supports 1 node for now
         rank = cfg.local_rank
-        world_size = torch.cuda.device_count()
-        mp = cfg.launcher in ['mp', 'multiprocessing'] and world_size > 1
-    distributed = world_size > 1
-    print(f'launch {cfg.launcher} with {world_size} GPUs, current rank: {rank}')
+        world_size = torch.cuda.device_count() if use_gpu else 1
+        mp = use_gpu and cfg.launcher in ['mp', 'multiprocessing'] and world_size > 1
+    distributed = use_gpu and world_size > 1
+    resource_name = 'GPUs' if use_gpu else 'CPU process'
+    print(f'launch {cfg.launcher} with {world_size} {resource_name}, current rank: {rank}')
     return rank, world_size, distributed, mp
 
 

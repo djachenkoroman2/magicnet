@@ -62,11 +62,29 @@ do
 done
 echo $PORT
 
-nvidia-smi
-nvcc --version
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi || echo "nvidia-smi failed, continuing"
+else
+    echo "nvidia-smi command not found, skipping GPU summary"
+fi
+
+if command -v nvcc >/dev/null 2>&1; then
+    nvcc --version
+else
+    echo "nvcc command not found, skipping nvcc --version"
+fi
 
 hostname
-NUM_GPU_AVAILABLE=`nvidia-smi --query-gpu=name --format=csv,noheader | wc -l`
+if command -v nvidia-smi >/dev/null 2>&1; then
+    GPU_QUERY=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || true)
+    if [[ -n "$GPU_QUERY" ]]; then
+        NUM_GPU_AVAILABLE=$(printf '%s\n' "$GPU_QUERY" | wc -l)
+    else
+        NUM_GPU_AVAILABLE=0
+    fi
+else
+    NUM_GPU_AVAILABLE=0
+fi
 echo $NUM_GPU_AVAILABLE
 
 

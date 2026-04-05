@@ -1,0 +1,71 @@
+# ---------------------------------------------------------------------------- #
+# Dataset cfgs
+# ---------------------------------------------------------------------------- #
+dataset:
+  common:
+    NAME: Birds
+    data_root: './data/birds'
+    num_points: 1024
+    split_ratios: [0.8, 0.1, 0.1]
+    seed: 42
+    normalize: True
+    cache_data: False
+  train:
+    split: train
+    num_points: 1024
+  val:
+    split: val
+    num_points: 1024
+  test:
+    split: test
+    num_points: 1024
+
+num_points: 1024
+num_classes: &nclass 22
+feature_keys: pos
+
+datatransforms:
+  train: [PointsToTensor, PointCloudScaling, PointCloudRotation]
+  val: [PointsToTensor]
+  vote: [PointCloudRotation]
+  kwargs:
+    scale: [0.9, 1.1]
+    anisotropic: False
+    angle: [0.0, 0.0, 1.0]
+
+batch_size: 32
+val_batch_size: 64
+dataloader:
+  num_workers: 6
+
+# ---------------------------------------------------------------------------- #
+# Training cfgs
+# ---------------------------------------------------------------------------- #
+criterion_args:
+  NAME: SmoothCrossEntropy
+  label_smoothing: 0.2
+
+lr: 0.001
+optimizer:
+  NAME: 'adamw'
+  weight_decay: 0.05
+
+sched: cosine
+epochs: 250
+warmup_epochs: 0
+min_lr: 1.0e-4
+t_max: 250
+
+grad_norm_clip: 1
+
+# ---------------------------------------------------------------------------- #
+# io and misc
+# ---------------------------------------------------------------------------- #
+log_dir: 'birds'
+print_freq: 10
+val_freq: 1
+pretrained_path: null
+
+wandb:
+  project: PointNeXt-Birds
+
